@@ -3,122 +3,116 @@
 namespace Netgsm\Otp;
 
 use Exception;
-use Ramsey\Uuid\Type\Integer;
 use SimpleXMLElement;
 
-class otp
+class OTP
 {   
    
     private $username;
     private $password;
     private $header;
+
+    private const ERROR_MESSAGES = [
+        20 => 'Mesaj metni ya da mesaj boyunu kontrol ediniz.',
+        30 => 'Geçersiz kullanıcı adı , şifre veya kullanıcınızın API erişim izninin olmadığını gösterir. Ayrıca eğer API erişiminizde IP sınırlaması yaptıysanız ve sınırladığınız ip dışında gönderim sağlıyorsanız 30 hata kodunu alırsınız. API erişim izninizi veya IP sınırlamanızı, web arayüzden; sağ üst köşede bulunan ayarlar> API işlemleri menüsünden kontrol edebilirsiniz.',
+        40 => 'Gönderici adınızı kontrol ediniz.',
+        41 => 'Gönderici adınızı kontrol ediniz.',
+        50 => 'Gönderilen numarayı kontrol ediniz.',
+        60 => 'Hesabınızda OTP SMS Paketi tanımlı değildir, kontrol ediniz.',
+        70 => 'Input parametrelerini kontrol ediniz.',
+        80 => 'Sorgulama sınır aşımı.(dakikada 100 adet gönderim yapılabilir.)',
+        100 => 'Sistem hatası.'
+    ];
+
     public function __construct()
     {
-     if(isset($_ENV['NETGSM_USERCODE']))
-      {
-          $this->username=$_ENV['NETGSM_USERCODE'];
-      }
-      else{
-          $this->username='x';
-      }
-      if(isset($_ENV['NETGSM_PASSWORD']))
-      {
-          $this->password=$_ENV['NETGSM_PASSWORD'];
-      }
-      else{
-          $this->password='x';
-      }
-      if(isset($_ENV['NETGSM_HEADER']))
-      {
-          $this->header=$_ENV['NETGSM_HEADER'];
-      }
-      else{
-          $this->header='x';
-      }
-        
+        $this->setCredentials([
+            'NETGSM_USERCODE' => 'username',
+            'NETGSM_PASSWORD' => 'password',
+            'NETGSM_HEADER'   => 'header',
+        ]);
     }
-    
-    public function otp($data):array
+
+    private function setCredentials(array $credentials)
     {
-        if(!isset($data['message'])){
-            
-            $response['durum']='message giriniz';
-            return $response;
-        }
-        
-        if(!isset($data['no'])){
-            $response['durum']='Numara giriniz';
-            return $response;
-        }
-        if(!isset($data['header'])){
-            $header=$this->header;
-           
-        }
-        else{
-            $header=$data['header'];
-        }
-        if(empty($header))
-        {
-             $response['message']='header bilgisini kontrol ediniz.';
-             return $response;
-        }
-        $xmlData='<?xml version="1.0"?>
-        <mainbody>
-           <header>
-               <usercode>'.$this->username.'</usercode>
-               <password>'.$this->password.'</password>
-               <msgheader>'.$header.'</msgheader>
-           </header>
-           <body>
-               <msg>
-                   '.$data['message'].'
-               </msg>
-               <no>'.$data['no'].'</no>
-           </body>
-        </mainbody>';
-        $ch = curl_init();
-		curl_setopt($ch, CURLOPT_URL,'https://api.netgsm.com.tr/sms/send/otp');
-		curl_setopt($ch, CURLOPT_SSL_VERIFYHOST,2);
-		curl_setopt($ch, CURLOPT_SSL_VERIFYPEER,0);
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER,1);
-		curl_setopt($ch, CURLOPT_HTTPHEADER, Array("Content-Type: text/xml"));
-		curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-		curl_setopt($ch, CURLOPT_POSTFIELDS, $xmlData);
-		$result = curl_exec($ch);
-       
-		
-        
-        $sonuc=array(
-            20=>'Mesaj metni ya da mesaj boyunu kontrol ediniz.',
-            30=>'Geçersiz kullanıcı adı , şifre veya kullanıcınızın API erişim izninin olmadığını gösterir.Ayrıca eğer API erişiminizde IP sınırlaması yaptıysanız ve sınırladığınız ip dışında gönderim sağlıyorsanız 30 hata kodunu alırsınız. API erişim izninizi veya IP sınırlamanızı , web arayüzden; sağ üst köşede bulunan ayarlar> API işlemleri menüsunden kontrol edebilirsiniz.',
-            40=>'Gönderici adınızı kontrol ediniz.',
-            41=>'Gönderici adınızı kontrol ediniz.',
-            50=>'Gönderilen numarayı kontrol ediniz.',
-            60=>'Hesabınızda OTP SMS Paketi tanımlı değildir, kontrol ediniz.',
-            70=>'	Input parametrelerini kontrol ediniz.',
-            80=>'Sorgulama sınır aşımı.(dakikada 100 adet gönderim yapılabilir.)',
-            100=>'Sistem hatası.',
-            
-            );
-            $donen = new SimpleXMLElement($result);
-
-            $code=strval($donen->main->code);
-            
-            if($code==20||$code==30||$code==40||$code==41||$code==50||$code==60||$code==70||$code==80||$code==100)
-            {
-                $response["durum"]=$sonuc[$code];
-                $response["code"]=$code;
+        foreach ($credentials as $envKey => $property) {
+            if (!isset($_ENV[$envKey]) && $property !== 'header') {
+                throw new \Exception("Environment variable {$envKey} not found.");
             }
-            else{
-                $response["durum"]='Gönderim başarılı.';
-                
-                $jobid=strval(($donen->main->jobID[0]));
-                $response["jobid"]=$jobid;
-            }
+            $this->$property = $_ENV[$envKey];
+        }
+    }
 
-           
+    /**
+     * @param array{
+     *      message: string,
+     *      no: string,
+     *      header:string
+     * } $data
+     */
+    public function otp(array $data): array
+    {
+        $requiredFields = ['message', 'no'];
+        foreach ($requiredFields as $field) {
+            if (!isset($data[$field])) {
+                return ['durum' => ucfirst($field) . ' giriniz'];
+            }
+        }
+
+        $header = $data['header'] ?? $this->header;
         
+        if (empty($header)) {
+            throw new \Exception("Header cannot be empty.");
+        }
+    
+        $xmlData = '<?xml version="1.0"?>
+            <mainbody>
+               <header>
+                   <usercode>' . htmlspecialchars($this->username) . '</usercode>
+                   <password>' . htmlspecialchars($this->password) . '</password>
+                   <msgheader>' . htmlspecialchars($header) . '</msgheader>
+               </header>
+               <body>
+                   <msg><![CDATA[' . htmlspecialchars($data['message']) . ']]></msg>
+                   <no>' . htmlspecialchars($data['no']) . '</no>
+               </body>
+            </mainbody>';
+    
+        $ch = curl_init('https://api.netgsm.com.tr/sms/send/otp');
+        curl_setopt_array($ch, [
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_SSL_VERIFYPEER => 0,
+            CURLOPT_RETURNTRANSFER => 1,
+            CURLOPT_HTTPHEADER => ["Content-Type: text/xml"],
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_POSTFIELDS => $xmlData
+        ]);
         
-        return $response;
+        $result = curl_exec($ch);
+
+        if ($result === false) {
+            return [
+                'durum' => 'cURL hatası: ' . curl_error($ch),
+                'status' => 'cURL hatası: ' . curl_error($ch)
+            ];
+        }
+        curl_close($ch);
+    
+        $donen = new SimpleXMLElement($result);
+        $code = (string)$donen->main->code;
+    
+        if (array_key_exists($code, self::ERROR_MESSAGES)) {
+            return [
+                'durum' => self::ERROR_MESSAGES[$code],
+                'status' => self::ERROR_MESSAGES[$code],
+                'code' => $code
+            ];
+        }
+    
+        return [
+            'durum' => 'Gönderim başarılı.',
+            'status' => 'Successfully sent.',
+            'jobid' => (string)$donen->main->jobID[0]
+        ];
     }
 }
